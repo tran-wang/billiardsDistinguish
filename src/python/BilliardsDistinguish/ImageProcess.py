@@ -181,7 +181,7 @@ def getEllipseMinRGB( im ):
 def createtemplateBalls():
     im0 = Image.new( "RGB", ( 640, 640 ), color = "rgb(255,255,255)" )
     im0 = addEllipseMask( im0 )
-    im0.save( InputDir + "0.bmp" )
+    im0.save( InputDir + "0.jpg" )
     drawEllipseHistogram( im0 ).save( InputDir + "0_histogram.jpg" )
     drawEllipseHistogram( im0.convert( "L" ) ).save( InputDir + "0_bright_histogram.jpg" )
 
@@ -269,7 +269,7 @@ def createtemplateBalls():
     drawEllipseHistogram( im8.convert( "L" ) ).save( InputDir + "8_bright_histogram.jpg" )
 
 
-createtemplateBalls()
+
 ###############################################################################
 # for unit test
 ###############################################################################
@@ -279,10 +279,10 @@ class ImageProcessTest( unittest.TestCase ):
         return f
 
     def setUp( self ):
-        self._im_2 = Image.open( InputDir + "_9.jpg" )
+        self._im_9 = Image.open( InputDir + "_9.jpg" )
 
     def tearDown( self ):
-        self._im_2 = None
+        self._im_9 = None
 
     @slow
     def test_createtemplateBalls( self ):
@@ -301,26 +301,26 @@ class ImageProcessTest( unittest.TestCase ):
         createEllipseMaskImage( 639, 639 )
 
     def test_cutImage_0_0_0_0( self ):
-        self.assertRaises( AssertionError, cutImage, self._im_2, 0, 0, 0, 0 )
+        self.assertRaises( AssertionError, cutImage, self._im_9, 0, 0, 0, 0 )
 
     def test_cutImage_0_0_1_1( self ):
-        cutImage( self._im_2, 0, 0, 1, 1 )
+        cutImage( self._im_9, 0, 0, 1, 1 )
 
     def test_cutImage_160_50_640_640( self ):
-        cutImage( self._im_2, 160, 50, 640, 640 )
+        cutImage( self._im_9, 160, 50, 640, 640 )
 
     def test_cutImage_160_50_800_800( self ):
-        cutImage( self._im_2, 160, 50, 8000, 8000 )
+        cutImage( self._im_9, 160, 50, 8000, 8000 )
 
     def test_addEllipseMask( self ):
-        x, y, w, h = locateEllipseInImage( self._im_2 )
-        im_2_e = cutImage( self._im_2, x, y, w, h )
+        x, y, w, h = locateEllipseInImage( self._im_9 )
+        im_2_e = cutImage( self._im_9, x, y, w, h )
         im_2_e.save( InputDir + "_9_cut.jpg" )
         addEllipseMask( im_2_e ).save( InputDir + "_9_cut_mask.jpg" )
 
     def test_locateEllipseInImage( self ):
         global Left, Top, width, height
-        self.assertEqual( locateEllipseInImage( self._im_2 ) , ( Left, Top, width, height ) )
+        self.assertEqual( locateEllipseInImage( self._im_9 ) , ( Left, Top, width, height ) )
 
     def test_getEllipseHistogramRGB( self ):
         im = Image.new( "RGB", ( 640, 640 ), "rgb(255,255,255)" )
@@ -332,7 +332,7 @@ class ImageProcessTest( unittest.TestCase ):
         self.assertEqual( getEllipseHistogram( im )[255], 322838 )
 
     def test_getEllipseAverageBright( self ):
-        im = cutImage( self._im_2, 160, 50, 640, 640 )
+        im = cutImage( self._im_9, 160, 50, 640, 640 )
         self.assertEqual( getEllipseAverageBright( im ), 127 )
 
     def test_getEllipseAverageBright_White( self ):
@@ -344,17 +344,17 @@ class ImageProcessTest( unittest.TestCase ):
         self.assertEqual( getEllipseAverageBright( im ), 0 )
 
     def test_drawEllipseHistogram( self ):
-        im = self._im_2.filter( ImageFilter.SMOOTH_MORE ).filter( ImageFilter.SMOOTH_MORE )
+        im = self._im_9.filter( ImageFilter.SMOOTH_MORE ).filter( ImageFilter.SMOOTH_MORE )
         im = drawEllipseHistogram( im )
         im.save( InputDir + "_9_histogram.jpg" )
 
     def test_drawEllipseHistogram_Bright( self ):
-        im = self._im_2.filter( ImageFilter.SMOOTH_MORE ).filter( ImageFilter.SMOOTH_MORE )
+        im = self._im_9.filter( ImageFilter.SMOOTH_MORE ).filter( ImageFilter.SMOOTH_MORE )
         im = drawEllipseHistogram( im.convert( "L" ) )
         im.save( InputDir + "_9_birght_histogram.jpg" )
 
     def test_getEllipseAverageRGB( self ):
-        im = cutImage( self._im_2, 160, 50, 640, 640 )
+        im = cutImage( self._im_9, 160, 50, 640, 640 )
         self.assertEqual( getEllipseAverageRGB( im ), ( 177, 119, 41 ) )
 
     def test_getEllipseAverageRGB_White( self ):
@@ -366,7 +366,7 @@ class ImageProcessTest( unittest.TestCase ):
         self.assertEqual( getEllipseAverageRGB( im ), ( 0, 0, 0 ) )
 
     def test_getEllipseMaxBright( self ):
-        im = cutImage( self._im_2, 160, 50, 640, 640 )
+        im = cutImage( self._im_9, 160, 50, 640, 640 )
         self.assertEqual( getEllipseMaxBright( im ), 253 )
 
     def test_getEllipseMaxBright_0( self ):
@@ -378,7 +378,7 @@ class ImageProcessTest( unittest.TestCase ):
         self.assertEqual( getEllipseMaxBright( im ), 255 )
 
     def test_getEllipseMaxRGB( self ):
-        im = cutImage( self._im_2, 160, 50, 640, 640 )
+        im = cutImage( self._im_9, 160, 50, 640, 640 )
         self.assertEqual( getEllipseMaxRGB( im ), ( 255, 255, 241 ) )
 
     def test_getEllipseMaxRGB_0( self ):
@@ -390,7 +390,7 @@ class ImageProcessTest( unittest.TestCase ):
         self.assertEqual( getEllipseMaxRGB( im ), ( 255, 255, 255 ) )
 
     def test_getEllipseMinBright( self ):
-        im = cutImage( self._im_2, 160, 50, 640, 640 )
+        im = cutImage( self._im_9, 160, 50, 640, 640 )
         self.assertEqual( getEllipseMinBright( im ), 30 )
 
     def test_getEllipseMinBright_0( self ):
@@ -402,7 +402,7 @@ class ImageProcessTest( unittest.TestCase ):
         self.assertEqual( getEllipseMinBright( im ), 255 )
 
     def test_getEllipseMinRGB( self ):
-        im = cutImage( self._im_2, 160, 50, 640, 640 )
+        im = cutImage( self._im_9, 160, 50, 640, 640 )
         self.assertEqual( getEllipseMinRGB( im ), ( 55, 19, 0 ) )
 
     def test_getEllipseMinRGB_0( self ):
