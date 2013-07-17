@@ -7,8 +7,6 @@ Top = 50
 width = 640
 height = 640
 
-InputDir = "../../../input/"
-
 def createEllipseMaskImage( width, height ):
     assert width >= 0 and  height >= 0
     im = Image.new( "1", ( width, height ) , 0 )
@@ -23,18 +21,27 @@ def cutImage( im, startX, startY, width, height ):
 def addEllipseMask( im ):
     w, h = im.size
     imMask = createEllipseMaskImage( w, h )
-    return Image.composite( im, imMask.convert( im.mode ), imMask )
+    imOut = Image.composite( im, imMask.convert( im.mode ), imMask )
+    return imOut
 
 def locateEllipseInImage( im ):
     global Left, Top, width, height
-    im = im.convert("1")
-    
     return  Left, Top, width, height
 
 def getEllipseHistogram( im ):
     w, h = im.size
     imMask = createEllipseMaskImage( w, h )
-    return im.histogram( imMask )
+    histogram = im.histogram( imMask )
+    filter = list()
+    for i in range( 41 ):
+        filter.append( 1 )
+    if str( im.mode ) == "L":
+        _filterList( histogram, filter )
+    elif str( im.mode ) == "RGB":
+        _filterList( histogram, filter, start = 0, end = 256 )
+        _filterList( histogram, filter, start = 256, end = 512 )
+        _filterList( histogram, filter, start = 512, end = 768 )
+    return histogram
 
 def _drawEllipseHistogramL( im ):
     assert str( im.mode ) == "L"
@@ -50,9 +57,8 @@ def _drawEllipseHistogramL( im ):
         draw.line( [( index, 100 ), ( index, 100 - int( ratio * 100 ) )], 0 )
     draw.line( [( 0, 100 ), ( 255, 100 )], 125 )
     average = getEllipseAverageBright( im )
-    max = getEllipseMaxBright( im )
-    min = getEllipseMinBright( im )
-    msg = "Max(%d), Min(%d), Average(%d)" % ( max, min, average )
+    max = getEllipseMaxCountBright( im )
+    msg = "Max(%d),  Average(%d)" % ( max, average )
     draw.text( ( 1, 105 ), msg, 0 )
     return imOut
 
@@ -85,9 +91,8 @@ def drawEllipseHistogram( im ):
         draw.line( [( index + 512, 100 ), ( index + 512, 100 - int( ratioB * 100 ) )], "rgb(0,0,255)" )
     draw.line( [( 0, 100 ), ( 767, 100 )], "rgb(125,125,125)" )
     averageR, averageG, averageB = getEllipseAverageRGB( im )
-    maxR, maxG, maxB = getEllipseMaxRGB( im )
-    minR, minG, minB = getEllipseMinRGB( im )
-    msg = "maxRGB(%d, %d, %d), minRGB(%d, %d, %d), averageRGB(%d, %d, %d)" % ( maxR, maxG, maxB, minR, minG, minB, averageR, averageG, averageB )
+    maxR, maxG, maxB = getEllipseMaxCountRGB( im )
+    msg = "maxRGB(%d, %d, %d), averageRGB(%d, %d, %d)" % ( maxR, maxG, maxB, averageR, averageG, averageB )
     draw.text( ( 50, 105 ), text = msg, fill = "rgb(0,0,0)", font = None )
     return imOut
 
@@ -102,6 +107,8 @@ def getEllipseAverageBright( im ):
         index = index + 1
     averageBright = 0
     index = 0
+    if countPixels == 0:
+        return 0
     for count in histogram:
         averageBright = averageBright + float( index * count ) / countPixels
         index = index + 1
@@ -122,151 +129,97 @@ def getEllipseAverageRGB( im ):
     averageBrightG = 0
     averageBrightB = 0
     for index in range( 256 ):
-        averageBrightR = averageBrightR + float( index * histogram[index ] ) / countPixelsR
-        averageBrightG = averageBrightG + float( index * histogram[index + 256] ) / countPixelsG
-        averageBrightB = averageBrightB + float( index * histogram[index + 512] ) / countPixelsB
+        if countPixelsR != 0:
+            averageBrightR = averageBrightR + float( index * histogram[index ] ) / countPixelsR
+        if countPixelsG != 0:
+            averageBrightG = averageBrightG + float( index * histogram[index + 256] ) / countPixelsG
+        if countPixelsB != 0:
+            averageBrightB = averageBrightB + float( index * histogram[index + 512] ) / countPixelsB
     return int( averageBrightR ), int( averageBrightG ), int( averageBrightB )
 
 
-def getEllipseMaxBright( im ):
+def getEllipseMaxCountBright( im ):
     im = im.convert( "L" )
     histogram = getEllipseHistogram( im )
     maxBright = 0
+    targetIndex = 0
     for index in range( 256 ):
-        if histogram[index] != 0 and index > maxBright:
-            maxBright = index
-    return maxBright
+        if histogram[index] > maxBright:
+            maxBright = histogram[index]
+            targetIndex = index
+    return targetIndex
 
-def getEllipseMaxRGB( im ):
+def getEllipseMaxCountRGB( im ):
     assert str( im.mode ) == "RGB"
     histogram = getEllipseHistogram( im )
     maxR = 0
     maxG = 0
     maxB = 0
+    targetIndexR = 0
+    targetIndexG = 0
+    targetIndexB = 0
     for index in range( 256 ):
-        if histogram[index] != 0 and index > maxR:
-            maxR = index
-        if histogram[index + 256] != 0 and index > maxG:
-            maxG = index
-        if histogram[index + 512] != 0 and index > maxB:
-            maxB = index
-    return maxR, maxG, maxB
+        if histogram[index] > maxR:
+            maxR = histogram[index]
+            targetIndexR = index
+        if histogram[index + 256] > maxG:
+            maxG = histogram[index + 256]
+            targetIndexG = index
+        if histogram[index + 512] > maxB:
+            maxB = histogram[index + 512]
+            targetIndexB = index
+    return targetIndexR, targetIndexG, targetIndexB
 
+def _filterList( targetList, filter = ( 1, 1, 1 ), start = 0, end = None ):
+    assert isinstance( filter, tuple ) or isinstance( filter, list )
+    length = len( filter )
+    assert length % 2 == 1
+    if end == None:
+        end = len( targetList )
+    newList = []
+    for i in range( length / 2 ):
+        newList.append( targetList[0] )
+    newList.extend( targetList[start: end] )
+    for i in range( length / 2 ):
+        newList.append( targetList[-1] )
+    allWeight = 0
+    for i in range( length ):
+        allWeight = allWeight + filter[i]
 
-def getEllipseMinBright( im ):
-    im = im.convert( "L" )
-    histogram = getEllipseHistogram( im )
-    minBright = 255
-    for index in range( 256 ):
-        if histogram[index] != 0 and index < minBright:
-            minBright = index
-    return minBright
+    for i in xrange( start, end ):
+        v1 = newList[i - start : i + length - start]
+        targetList[i] = _multiList( v1, filter ) / allWeight
 
-def getEllipseMinRGB( im ):
-    assert str( im.mode ) == "RGB"
-    histogram = getEllipseHistogram( im )
-    minR = 255
-    minG = 255
-    minB = 255
-    for index in range( 256 ):
-        if histogram[index] != 0 and index < minR:
-            minR = index
-        if histogram[index + 256] != 0 and index < minG:
-            minG = index
-        if histogram[index + 512] != 0 and index < minB:
-            minB = index
-    return minR, minG, minB
+def _multiList( v1, v2 ):
+    assert len( v1 ) == len( v2 )
+    result = 0
+    for i in range( len( v1 ) ):
+        result = result + v1[i] * v2[i]
+    return result
 
-
-def createtemplateBalls():
-    im0 = Image.new( "RGB", ( 640, 640 ), color = "rgb(255,255,255)" )
-    im0 = addEllipseMask( im0 )
-    im0.save( InputDir + "0.jpg" )
-    drawEllipseHistogram( im0 ).save( InputDir + "0_histogram.jpg" )
-    drawEllipseHistogram( im0.convert( "L" ) ).save( InputDir + "0_bright_histogram.jpg" )
-
-    im1 = Image.new( "RGB", ( 640, 640 ), color = "rgb(255,255,0)" )
-    im1 = addEllipseMask( im1 )
-    im1.save( InputDir + "1.jpg" )
-    drawEllipseHistogram( im1 ).save( InputDir + "1_histogram.jpg" )
-    drawEllipseHistogram( im1.convert( "L" ) ).save( InputDir + "1_bright_histogram.jpg" )
-    draw = ImageDraw.Draw( im1, mode = "RGB" )
-    draw.ellipse( ( 90, 90, 512, 512 ), fill = "rgb(255,255,255)" )
-    im1.save( InputDir + "9.jpg" )
-    drawEllipseHistogram( im1 ).save( InputDir + "9_histogram.jpg" )
-    drawEllipseHistogram( im1.convert( "L" ) ).save( InputDir + "9_bright_histogram.jpg" )
-
-    im2 = Image.new( "RGB", ( 640, 640 ), color = "rgb(0,0,255)" )
-    im2 = addEllipseMask( im2 )
-    im2.save( InputDir + "2.jpg" )
-    drawEllipseHistogram( im2 ).save( InputDir + "2_histogram.jpg" )
-    drawEllipseHistogram( im2.convert( "L" ) ).save( InputDir + "2_bright_histogram.jpg" )
-    draw = ImageDraw.Draw( im2, mode = "RGB" )
-    draw.ellipse( ( 90, 90, 512, 512 ), fill = "rgb(255,255,255)" )
-    im2.save( InputDir + "10.jpg" )
-    drawEllipseHistogram( im2 ).save( InputDir + "10_histogram.jpg" )
-    drawEllipseHistogram( im2.convert( "L" ) ).save( InputDir + "10_bright_histogram.jpg" )
-
-    im3 = Image.new( "RGB", ( 640, 640 ), color = "rgb(255,0,0)" )
-    im3 = addEllipseMask( im3 )
-    im3.save( InputDir + "3.jpg" )
-    drawEllipseHistogram( im3 ).save( InputDir + "3_histogram.jpg" )
-    drawEllipseHistogram( im3.convert( "L" ) ).save( InputDir + "3_bright_histogram.jpg" )
-    draw = ImageDraw.Draw( im3, mode = "RGB" )
-    draw.ellipse( ( 90, 90, 512, 512 ), fill = "rgb(255,255,255)" )
-    im3.save( InputDir + "11.jpg" )
-    drawEllipseHistogram( im3 ).save( InputDir + "11_histogram.jpg" )
-    drawEllipseHistogram( im3.convert( "L" ) ).save( InputDir + "11_bright_histogram.jpg" )
-
-    im4 = Image.new( "RGB", ( 640, 640 ), color = "rgb(128,0,128)" )
-    im4 = addEllipseMask( im4 )
-    im4.save( InputDir + "4.jpg" )
-    drawEllipseHistogram( im4 ).save( InputDir + "4_histogram.jpg" )
-    drawEllipseHistogram( im4.convert( "L" ) ).save( InputDir + "4_bright_histogram.jpg" )
-    draw = ImageDraw.Draw( im4, mode = "RGB" )
-    draw.ellipse( ( 90, 90, 512, 512 ), fill = "rgb(255,255,255)" )
-    im4.save( InputDir + "12.jpg" )
-    drawEllipseHistogram( im4 ).save( InputDir + "12_histogram.jpg" )
-    drawEllipseHistogram( im4.convert( "L" ) ).save( InputDir + "12_bright_histogram.jpg" )
-
-    im5 = Image.new( "RGB", ( 640, 640 ), color = "rgb(255,128,0)" )
-    im5 = addEllipseMask( im5 )
-    im5.save( InputDir + "5.jpg" )
-    drawEllipseHistogram( im5 ).save( InputDir + "5_histogram.jpg" )
-    drawEllipseHistogram( im5.convert( "L" ) ).save( InputDir + "5_bright_histogram.jpg" )
-    draw = ImageDraw.Draw( im5, mode = "RGB" )
-    draw.ellipse( ( 90, 90, 512, 512 ), fill = "rgb(255,255,255)" )
-    im5.save( InputDir + "13.jpg" )
-    drawEllipseHistogram( im5 ).save( InputDir + "13_histogram.jpg" )
-    drawEllipseHistogram( im5.convert( "L" ) ).save( InputDir + "13_bright_histogram.jpg" )
-
-    im6 = Image.new( "RGB", ( 640, 640 ), color = "rgb(0,255,0)" )
-    im6 = addEllipseMask( im6 )
-    im6.save( InputDir + "6.jpg" )
-    drawEllipseHistogram( im6 ).save( InputDir + "6_histogram.jpg" )
-    drawEllipseHistogram( im6.convert( "L" ) ).save( InputDir + "6_bright_histogram.jpg" )
-    draw = ImageDraw.Draw( im6, mode = "RGB" )
-    draw.ellipse( ( 90, 90, 512, 512 ), fill = "rgb(255,255,255)" )
-    im6.save( InputDir + "14.jpg" )
-    drawEllipseHistogram( im6 ).save( InputDir + "14_histogram.jpg" )
-    drawEllipseHistogram( im6.convert( "L" ) ).save( InputDir + "14_bright_histogram.jpg" )
-
-    im7 = Image.new( "RGB", ( 640, 640 ), color = "rgb(128,0,0)" )
-    im7 = addEllipseMask( im7 )
-    im7.save( InputDir + "7.jpg" )
-    drawEllipseHistogram( im7 ).save( InputDir + "7_histogram.jpg" )
-    drawEllipseHistogram( im7.convert( "L" ) ).save( InputDir + "7_bright_histogram.jpg" )
-    draw = ImageDraw.Draw( im7, mode = "RGB" )
-    draw.ellipse( ( 90, 90, 512, 512 ), fill = "rgb(255,255,255)" )
-    im7.save( InputDir + "15.jpg" )
-    drawEllipseHistogram( im7 ).save( InputDir + "15_histogram.jpg" )
-    drawEllipseHistogram( im7.convert( "L" ) ).save( InputDir + "15_bright_histogram.jpg" )
-
-    im8 = Image.new( "RGB", ( 640, 640 ), color = "rgb(0,0,0)" )
-    im8 = addEllipseMask( im8 )
-    im8.save( InputDir + "8.jpg" )
-    drawEllipseHistogram( im8 ).save( InputDir + "8_histogram.jpg" )
-    drawEllipseHistogram( im8.convert( "L" ) ).save( InputDir + "8_bright_histogram.jpg" )
+################################################################################
+# def removeReflectionPart( im ):
+#    w, h = im.size
+#    for x in xrange( w ):
+#        for y in xrange( h ):
+#            if _isLight( im.getpixel( ( x, y ) ) ):
+#                im.putpixel( ( x, y ), ( 0, 0, 0 ) )
+# 
+# def _isLight( rgb = ( 1, 1, 1 ) ):
+#    r, g, b = rgb
+#    if r > 100 and g > 100 and b > 50\
+#        and abs( r - g ) / float( max( r, g ) ) < 0.5\
+#        and abs( r - b ) / float( max( r, b ) ) < 0.5\
+#        and abs( g - b ) / float( max( g, b ) ) < 0.5:
+#        return True
+#    elif r > 50 and g > 50 and b > 50\
+#        and abs( r - g ) / float( max( r, g ) ) < 0.1\
+#        and abs( r - b ) / float( max( r, b ) ) < 0.1\
+#        and abs( g - b ) / float( max( g, b ) ) < 0.1:
+#        return True
+#    else:
+#        return False
+################################################################################
 
 
 
@@ -279,14 +232,10 @@ class ImageProcessTest( unittest.TestCase ):
         return f
 
     def setUp( self ):
-        self._im_9 = Image.open( InputDir + "_9.jpg" )
+        self._test_im = Image.open( "../../../input/_9.jpg" )
 
     def tearDown( self ):
-        self._im_9 = None
-
-    @slow
-    def test_createtemplateBalls( self ):
-        createtemplateBalls()
+        self._test_im = None
 
     def test_createEllipseMaskImage_0_0( self ):
         createEllipseMaskImage( 0, 0 )
@@ -301,26 +250,25 @@ class ImageProcessTest( unittest.TestCase ):
         createEllipseMaskImage( 639, 639 )
 
     def test_cutImage_0_0_0_0( self ):
-        self.assertRaises( AssertionError, cutImage, self._im_9, 0, 0, 0, 0 )
+        self.assertRaises( AssertionError, cutImage, self._test_im, 0, 0, 0, 0 )
 
     def test_cutImage_0_0_1_1( self ):
-        cutImage( self._im_9, 0, 0, 1, 1 )
+        cutImage( self._test_im, 0, 0, 1, 1 )
 
     def test_cutImage_160_50_640_640( self ):
-        cutImage( self._im_9, 160, 50, 640, 640 )
+        cutImage( self._test_im, 160, 50, 640, 640 )
 
     def test_cutImage_160_50_800_800( self ):
-        cutImage( self._im_9, 160, 50, 8000, 8000 )
+        cutImage( self._test_im, 160, 50, 8000, 8000 )
 
     def test_addEllipseMask( self ):
-        x, y, w, h = locateEllipseInImage( self._im_9 )
-        im_2_e = cutImage( self._im_9, x, y, w, h )
-        im_2_e.save( InputDir + "_9_cut.jpg" )
-        addEllipseMask( im_2_e ).save( InputDir + "_9_cut_mask.jpg" )
+        x, y, w, h = locateEllipseInImage( self._test_im )
+        im = cutImage( self._test_im, x, y, w, h )
+        addEllipseMask( im )
 
     def test_locateEllipseInImage( self ):
         global Left, Top, width, height
-        self.assertEqual( locateEllipseInImage( self._im_9 ) , ( Left, Top, width, height ) )
+        self.assertEqual( locateEllipseInImage( self._test_im ) , ( Left, Top, width, height ) )
 
     def test_getEllipseHistogramRGB( self ):
         im = Image.new( "RGB", ( 640, 640 ), "rgb(255,255,255)" )
@@ -332,7 +280,7 @@ class ImageProcessTest( unittest.TestCase ):
         self.assertEqual( getEllipseHistogram( im )[255], 322838 )
 
     def test_getEllipseAverageBright( self ):
-        im = cutImage( self._im_9, 160, 50, 640, 640 )
+        im = cutImage( self._test_im, 160, 50, 640, 640 )
         self.assertEqual( getEllipseAverageBright( im ), 127 )
 
     def test_getEllipseAverageBright_White( self ):
@@ -344,17 +292,15 @@ class ImageProcessTest( unittest.TestCase ):
         self.assertEqual( getEllipseAverageBright( im ), 0 )
 
     def test_drawEllipseHistogram( self ):
-        im = self._im_9.filter( ImageFilter.SMOOTH_MORE ).filter( ImageFilter.SMOOTH_MORE )
+        im = self._test_im.filter( ImageFilter.SMOOTH_MORE ).filter( ImageFilter.SMOOTH_MORE )
         im = drawEllipseHistogram( im )
-        im.save( InputDir + "_9_histogram.jpg" )
 
     def test_drawEllipseHistogram_Bright( self ):
-        im = self._im_9.filter( ImageFilter.SMOOTH_MORE ).filter( ImageFilter.SMOOTH_MORE )
+        im = self._test_im.filter( ImageFilter.SMOOTH_MORE ).filter( ImageFilter.SMOOTH_MORE )
         im = drawEllipseHistogram( im.convert( "L" ) )
-        im.save( InputDir + "_9_birght_histogram.jpg" )
 
     def test_getEllipseAverageRGB( self ):
-        im = cutImage( self._im_9, 160, 50, 640, 640 )
+        im = cutImage( self._test_im, 160, 50, 640, 640 )
         self.assertEqual( getEllipseAverageRGB( im ), ( 177, 119, 41 ) )
 
     def test_getEllipseAverageRGB_White( self ):
@@ -365,50 +311,30 @@ class ImageProcessTest( unittest.TestCase ):
         im = Image.new( "RGB", ( 640, 640 ), "rgb(0,0,0)" )
         self.assertEqual( getEllipseAverageRGB( im ), ( 0, 0, 0 ) )
 
-    def test_getEllipseMaxBright( self ):
-        im = cutImage( self._im_9, 160, 50, 640, 640 )
-        self.assertEqual( getEllipseMaxBright( im ), 253 )
+    def test_getEllipseMaxCountBright( self ):
+        im = cutImage( self._test_im, 160, 50, 640, 640 )
+        self.assertEqual( getEllipseMaxCountBright( im ), 173 )
 
-    def test_getEllipseMaxBright_0( self ):
+    def test_getEllipseMaxCountBright_0( self ):
         im = Image.new( "RGB", ( 640, 640 ), "rgb(0,0,0)" )
-        self.assertEqual( getEllipseMaxBright( im ), 0 )
+        self.assertEqual( getEllipseMaxCountBright( im ), 0 )
 
-    def test_getEllipseMaxBright_255( self ):
+    def test_getEllipseMaxCountBright_255( self ):
         im = Image.new( "RGB", ( 640, 640 ), "rgb(255,255,255)" )
-        self.assertEqual( getEllipseMaxBright( im ), 255 )
+        self.assertEqual( getEllipseMaxCountBright( im ), 255 )
 
-    def test_getEllipseMaxRGB( self ):
-        im = cutImage( self._im_9, 160, 50, 640, 640 )
-        self.assertEqual( getEllipseMaxRGB( im ), ( 255, 255, 241 ) )
+    def test_getEllipseMaxCountRGB( self ):
+        im = cutImage( self._test_im, 160, 50, 640, 640 )
+        self.assertEqual( getEllipseMaxCountRGB( im ), ( 240, 156, 0 ) )
 
-    def test_getEllipseMaxRGB_0( self ):
+    def test_getEllipseMaxCountRGB_0( self ):
         im = Image.new( "RGB", ( 640, 640 ), "rgb(0,0,0)" )
-        self.assertEqual( getEllipseMaxRGB( im ), ( 0, 0, 0 ) )
+        self.assertEqual( getEllipseMaxCountRGB( im ), ( 0, 0, 0 ) )
 
-    def test_getEllipseMaxRGB_255( self ):
+    def test_getEllipseMaxCountRGB_255( self ):
         im = Image.new( "RGB", ( 640, 640 ), "rgb(255,255,255)" )
-        self.assertEqual( getEllipseMaxRGB( im ), ( 255, 255, 255 ) )
+        self.assertEqual( getEllipseMaxCountRGB( im ), ( 255, 255, 255 ) )
 
-    def test_getEllipseMinBright( self ):
-        im = cutImage( self._im_9, 160, 50, 640, 640 )
-        self.assertEqual( getEllipseMinBright( im ), 30 )
-
-    def test_getEllipseMinBright_0( self ):
-        im = Image.new( "RGB", ( 640, 640 ), "rgb(0,0,0)" )
-        self.assertEqual( getEllipseMinBright( im ), 0 )
-
-    def test_getEllipseMinBright_255( self ):
-        im = Image.new( "RGB", ( 640, 640 ), "rgb(255,255,255)" )
-        self.assertEqual( getEllipseMinBright( im ), 255 )
-
-    def test_getEllipseMinRGB( self ):
-        im = cutImage( self._im_9, 160, 50, 640, 640 )
-        self.assertEqual( getEllipseMinRGB( im ), ( 55, 19, 0 ) )
-
-    def test_getEllipseMinRGB_0( self ):
-        im = Image.new( "RGB", ( 640, 640 ), "rgb(0,0,0)" )
-        self.assertEqual( getEllipseMinRGB( im ), ( 0, 0, 0 ) )
-
-    def test_getEllipseMinRGB_255( self ):
-        im = Image.new( "RGB", ( 640, 640 ), "rgb(255,255,255)" )
-        self.assertEqual( getEllipseMinRGB( im ), ( 255, 255, 255 ) )
+    def test_filterList( self ):
+        l = list( range( 256 ) )
+        _filterList( l )
