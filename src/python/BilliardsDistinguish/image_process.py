@@ -7,16 +7,36 @@
 
 import colorsys
 import unittest
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
+import PIL
+from Crypto.SelfTest import SelfTestError
 
 # default position and size of billiards in the target pictures
-LEFT = 160
-TOP = 50
-WIDTH = 640
-HEIGHT = 640
+LEFT = 215
+TOP = 130
+WIDTH = 270
+HEIGHT = 270
 
 
-def create_ellipse_mask_image(width, height):
+def set_default_position(left, top, width, height):
+    '''set default position of the billiards in each image.
+    We are assume billiards is at fixed position and the image is taked with
+    fixed resolution and at fixed point, this will improve the process locate
+    billiards in image, and easy to implemented in reality.
+    '''
+    global LEFT, TOP, WIDTH, HEIGHT
+    LEFT = left
+    TOP = top
+    WIDTH = width
+    HEIGHT = height
+
+def get_default_position():
+    '''return default position of the billiards in each image.
+    '''
+    global  LEFT, TOP, WIDTH, HEIGHT
+    return (LEFT, TOP, WIDTH, HEIGHT)
+
+def create_ellipse_mask_image(width, height, im=None):
     '''Create an image with given size, draw an ellipse at center of the image,
     all pixels outside the ellipse with value 0, and inside the ellipse with
     value 1.
@@ -24,6 +44,8 @@ def create_ellipse_mask_image(width, height):
     Args:
         width: width of the output image, should not less than 0.
         height: height of the output image, should not less than 0.
+        im(option): instance of PIL.Image, should be the image with billiards
+            in it, if im is not None, will mask every pixel with white color.
 
     Returns:
         An instance of class PIL.Image with model "1".
@@ -31,10 +53,24 @@ def create_ellipse_mask_image(width, height):
         AssertError: width < 0 or height < 0.
     '''
     assert width >= 0 and  height >= 0
-    im = Image.new("1", (width, height) , 0)
-    draw = ImageDraw.Draw(im, "1")
+    imOut = Image.new("1", (width, height) , 0)
+    draw = ImageDraw.Draw(imOut, "1")
     draw.ellipse((0, 0, width, height), fill=1, outline=1)
-    return im
+    if im != None:
+        assert isinstance(im, PIL.Image.Image) and im.size == (width, height)
+        for x in range(width):
+            for y in range(height):
+                color = im.getpixel((x, y))
+                if is_white_color(color):
+                    imOut.putpixel((x, y), 0)
+    return imOut
+
+def is_white_color(color):
+    if isinstance(color, tuple):
+        h, l, s = colorsys.rgb_to_hls(color[0], color[1], color[2])
+        return abs(s) < 0.60 and l > 75
+    else:
+        return color > 128
 
 def cut_region_in_image(im, startX, startY, width, height):
     '''Cut region in the image.
@@ -53,7 +89,7 @@ def cut_region_in_image(im, startX, startY, width, height):
     assert width > 0 and height > 0 and startX >= 0 and startY >= 0
     return im.crop((startX, startY, startX + width, startY + height))
 
-def add_ellipse_mask_to_image(im):
+def add_ellipse_mask_to_image(im, masked=False):
     '''Add mask to given image, use create_ellipse_mask_image to create mask.
 
     Args:
@@ -63,35 +99,55 @@ def add_ellipse_mask_to_image(im):
         A new PIL.Image instance with mask added.
     '''
     w, h = im.size
-    imMask = create_ellipse_mask_image(w, h)
+    im_ = None
+    if masked:
+        im_ = im
+    imMask = create_ellipse_mask_image(w, h, im_)
     imOut = Image.composite(im, imMask.convert(im.mode), imMask)
     return imOut
 
-def locate_billiards_in_image(im):
+def locate_billiards_in_image(im, background=1):
     '''locate position and size of the  billiards in the given image.
 
     Args:
-        im: instance of PIL.Image, with billiards contented.
+        im: instance of PIL.Image, with billiards contented
+        background(option): background color, 0 or 1, 1 represent white color,
+            0 represent black color. It's suggested used white color as
+            background, and use black 8 to locate billiards for first time,
+            and remember the location for other billiards.
 
     Returns:
         (x,y,width,height) position and size of the billiards in the image.
     '''
-    # TODO(tran-wang) add new implement locate billiards automatically.
-    global LEFT, TOP, WIDTH, HEIGHT
-    return  LEFT, TOP, WIDTH, HEIGHT
+    def reverse_color(v):
+        if v == 1:
+            return 0
+        elif v == 0:
+            return 1
+        else:
+            return 0
+    im_01 = im.convert("1")
+    if background == 1:
+        im_01 = Image.eval(im_01, reverse_color)
+    return im_01.getbbox()
 
-def get_ellipse_histogram_of_image(im):
-    '''Get histogram of the image, do NOT counter pixels outside the ellipse.
+def get_ellipse_histogram_of_image(im, masked=False):
+    '''Get histogram of the image, NOT counter pixels outside the ellipse.
 
     Args:
         im: an instance of PIL.Image
+        masked(option): NOT counter white pixels when set masked to True.
+            default: True
 
     Returns:
         a list of integer indicate each band's histogram  of the given image.
         len(list) equal 256 * band_counter
     '''
+    im_ = None
+    if masked:
+        im_ = im
     w, h = im.size
-    imMask = create_ellipse_mask_image(w, h)
+    imMask = create_ellipse_mask_image(w, h, im_)
     return im.histogram(imMask)
 
 def smooth_histogram(histogram, filterLength=41):
@@ -111,13 +167,24 @@ def smooth_histogram(histogram, filterLength=41):
         _filterList(histogram, filter, start=256 * i, end=256 * (i + 1))
     return histogram
 
-def drawEllipseHistogram(im):
+def draw_ellipse_histogram(im, masked=False):
+    '''draw histogram to a new image, use get_ellipse_histogram_of_image(im,masked)
+    to get histogram of the image.
+
+    Args:
+        im: an instance of PIL.Image
+        masked(option): NOT counter pixels outside the ellipse and white pixels when
+            set masked to True. default: True
+
+    Returns:
+        an new instance of PIL.Image
+    '''
     if str(im.mode) == "L":
-        return _drawEllipseHistogramL(im)
+        return _draw_ellipse_histogram_L(im, masked)
     assert str(im.mode) == "RGB"
     imOut = Image.new("RGB", (3 * 256, 120), "rgb(255,255,255)")
     draw = ImageDraw.Draw(imOut, "RGB")
-    histogram = get_ellipse_histogram_of_image(im)
+    histogram = get_ellipse_histogram_of_image(im, masked)
     pixCountMaxR = 0
     pixCountMaxG = 0
     pixCountMaxB = 0
@@ -135,21 +202,36 @@ def drawEllipseHistogram(im):
         ratioR = float(countR / float(pixCountMaxR))
         ratioG = float(countG / float(pixCountMaxG))
         ratioB = float(countB / float(pixCountMaxB))
-        draw.line([(index, 100), (index, 100 - int(ratioR * 100))], "rgb(255,0,0)")
-        draw.line([(index + 256, 100), (index + 256, 100 - int(ratioG * 100))], "rgb(0,255,0)")
-        draw.line([(index + 512, 100), (index + 512, 100 - int(ratioB * 100))], "rgb(0,0,255)")
+        draw.line([(index, 100), (index, 100 - int(ratioR * 100))],
+                  "rgb(255,0,0)")
+        draw.line([(index + 256, 100), (index + 256, 100 - int(ratioG * 100))],
+                  "rgb(0,255,0)")
+        draw.line([(index + 512, 100), (index + 512, 100 - int(ratioB * 100))],
+                  "rgb(0,0,255)")
     draw.line([(0, 100), (767, 100)], "rgb(125,125,125)")
-    averageR, averageG, averageB = getEllipseAverageRGB(im)
-    maxR, maxG, maxB = getEllipseMaxCountRGB(im)
-    msg = "maxRGB(%d, %d, %d), averageRGB(%d, %d, %d)" % (maxR, maxG, maxB, averageR, averageG, averageB)
+    averageR, averageG, averageB = get_ellipse_average_RGB(im, masked)
+    maxR, maxG, maxB = get_ellipse_max_count_RGB(im, masked)
+    msg = "maxRGB(%d, %d, %d), averageRGB(%d, %d, %d)" % \
+        (maxR, maxG, maxB, averageR, averageG, averageB)
     draw.text((50, 105), text=msg, fill="rgb(0,0,0)", font=None)
     return imOut
 
-def _drawEllipseHistogramL(im):
+def _draw_ellipse_histogram_L(im, masked=False):
+    '''draw histogram to a new image, use get_ellipse_histogram_of_image(im,masked)
+    to get histogram of the image.
+
+    Args:
+        im: an instance of PIL.Image, im.mode == "L"
+        masked(option): NOT counter pixels outside the ellipse and white pixels when
+            set masked to True. default: True
+
+    Returns:
+        an new instance of PIL.Image
+    '''
     assert str(im.mode) == "L"
     imOut = Image.new("L", (256, 120), 255)
     draw = ImageDraw.Draw(imOut, "L")
-    histogram = get_ellipse_histogram_of_image(im)
+    histogram = get_ellipse_histogram_of_image(im, masked)
     pixelCountMax = 0.0;
     for index in range(256):
         if histogram[index] > pixelCountMax:
@@ -158,15 +240,25 @@ def _drawEllipseHistogramL(im):
         ratio = float(float(histogram[index]) / float(pixelCountMax))
         draw.line([(index, 100), (index, 100 - int(ratio * 100))], 0)
     draw.line([(0, 100), (255, 100)], 125)
-    average = getEllipseAverageBright(im)
-    max = getEllipseMaxCountBright(im)
+    average = get_ellipse_average_bright(im, masked)
+    max = get_ellipse_max_count_bright(im, masked)
     msg = "Max(%d),  Average(%d)" % (max, average)
     draw.text((1, 105), msg, 0)
     return imOut
 
-def getEllipseAverageBright(im):
+def get_ellipse_average_bright(im, maksed=True):
+    '''get average brightness of given image.
+
+    Args:
+        im: an instance of PIL.Image
+        masked(option): NOT counter pixels outside the ellipse and white pixels when
+            set masked to True. default: True
+
+    Returns:
+        average brightness of the given image.
+    '''
     im = im.convert("L")
-    histogram = get_ellipse_histogram_of_image(im)
+    histogram = get_ellipse_histogram_of_image(im, maksed)
     index = 0
     countPixels = 0
     for count in histogram:
@@ -182,9 +274,19 @@ def getEllipseAverageBright(im):
     return  int(averageBright)
 
 
-def getEllipseAverageRGB(im):
+def get_ellipse_average_RGB(im, masked=False):
+    '''get average value of each band (R,G,B) of given image.
+
+    Args:
+        im: an instance of PIL.Image, im.mode == "RGB"
+        masked(option): NOT counter pixels outside the ellipse and white pixels when
+            set masked to True. default: True
+
+    Returns:
+        (R,G,B): average value of band (R,G,B) of the given image.
+    '''
     assert str(im.mode) == "RGB"
-    histogram = get_ellipse_histogram_of_image(im)
+    histogram = get_ellipse_histogram_of_image(im, masked)
     countPixelsR = 0
     countPixelsG = 0
     countPixelsB = 0
@@ -197,17 +299,31 @@ def getEllipseAverageRGB(im):
     averageBrightB = 0
     for index in range(256):
         if countPixelsR != 0:
-            averageBrightR = averageBrightR + float(index * histogram[index ]) / countPixelsR
+            averageBrightR = averageBrightR + \
+                float(index * histogram[index ]) / countPixelsR
         if countPixelsG != 0:
-            averageBrightG = averageBrightG + float(index * histogram[index + 256]) / countPixelsG
+            averageBrightG = averageBrightG + \
+                float(index * histogram[index + 256]) / countPixelsG
         if countPixelsB != 0:
-            averageBrightB = averageBrightB + float(index * histogram[index + 512]) / countPixelsB
+            averageBrightB = averageBrightB + \
+                float(index * histogram[index + 512]) / countPixelsB
     return int(averageBrightR), int(averageBrightG), int(averageBrightB)
 
 
-def getEllipseMaxCountBright(im):
+def get_ellipse_max_count_bright(im, masked=False):
+    '''get max count brightness of the given image, max count is the
+    brightness that max count pixels have the same brightness.
+
+    Args:
+        im: an instance of PIL.Image
+        masked(option): NOT counter pixels outside the ellipse and white pixels when
+            set masked to True. default: True
+
+    Returns:
+        max count brightness of the given image.
+    '''
     im = im.convert("L")
-    histogram = get_ellipse_histogram_of_image(im)
+    histogram = get_ellipse_histogram_of_image(im, masked)
     maxBright = 0
     targetIndex = 0
     for index in range(256):
@@ -216,9 +332,20 @@ def getEllipseMaxCountBright(im):
             targetIndex = index
     return targetIndex
 
-def getEllipseMaxCountRGB(im):
+def get_ellipse_max_count_RGB(im, masked=False):
+    '''get max count value of each band (R,G,B) in the given image, max count
+    is the brightness that max count pixels have the same brightness.
+
+    Args:
+        im: an instance of PIL.Image
+        masked(option): NOT counter pixels outside the ellipse and white pixels when
+            set masked to True. default: True
+
+    Returns:
+        (r,b,b): max count brightness of band (R,G,B) in the given image.
+    '''
     assert str(im.mode) == "RGB"
-    histogram = get_ellipse_histogram_of_image(im)
+    histogram = get_ellipse_histogram_of_image(im, masked)
     maxR = 0
     maxG = 0
     maxB = 0
@@ -238,6 +365,15 @@ def getEllipseMaxCountRGB(im):
     return targetIndexR, targetIndexG, targetIndexB
 
 def _filterList(targetList, filter=(1, 1, 1), start=0, end=None):
+    '''filter the give list.
+    Use Convolution to process list.
+
+    Args:
+        targetList: the list to be filtered.
+        filter(option): the filter used to make convolution, default=(1,1,1)
+        start(option): start index(included) of targetList, default=0
+        end(option): end index(not included) of targetList,default=len(targetList)
+    '''
     assert isinstance(filter, tuple) or isinstance(filter, list)
     length = len(filter)
     assert length % 2 == 1
@@ -258,36 +394,20 @@ def _filterList(targetList, filter=(1, 1, 1), start=0, end=None):
         targetList[i] = _multiList(v1, filter) / allWeight
 
 def _multiList(v1, v2):
+    '''multiply two list/tuple
+    multiple each value in v1 and v2, and sum them.
+
+    Args:
+        v1: first list/tuple, len(v1) == len(v2).
+        v2: second list/tuple, len(v1) == len(v2).
+    Returns:
+        the produce of the multiply.
+    '''
     assert len(v1) == len(v2)
     result = 0
     for i in range(len(v1)):
         result = result + v1[i] * v2[i]
     return result
-
-################################################################################
-# def removeReflectionPart( im ):
-#    w, h = im.size
-#    for x in xrange( w ):
-#        for y in xrange( h ):
-#            if _isLight( im.getpixel( ( x, y ) ) ):
-#                im.putpixel( ( x, y ), ( 0, 0, 0 ) )
-#
-# def _isLight( rgb = ( 1, 1, 1 ) ):
-#    r, g, b = rgb
-#    if r > 100 and g > 100 and b > 50\
-#        and abs( r - g ) / float( max( r, g ) ) < 0.5\
-#        and abs( r - b ) / float( max( r, b ) ) < 0.5\
-#        and abs( g - b ) / float( max( g, b ) ) < 0.5:
-#        return True
-#    elif r > 50 and g > 50 and b > 50\
-#        and abs( r - g ) / float( max( r, g ) ) < 0.1\
-#        and abs( r - b ) / float( max( r, b ) ) < 0.1\
-#        and abs( g - b ) / float( max( g, b ) ) < 0.1:
-#        return True
-#    else:
-#        return False
-################################################################################
-
 
 
 ###############################################################################
@@ -299,10 +419,26 @@ class ImageProcessTest(unittest.TestCase):
         return f
 
     def setUp(self):
-        self._test_im = Image.open("../../../input/_9.jpg")
+        self._test_im = Image.open("../../../pictures/640.480/0_a.jpg")
 
     def tearDown(self):
         self._test_im = None
+
+    def test_is_white_color(self):
+        self.assertTrue(is_white_color((255, 255, 255)))
+        self.assertTrue(is_white_color((200, 200, 200)))
+        self.assertTrue(is_white_color((150, 150, 150)))
+        self.assertFalse(is_white_color((255, 255, 0)))
+        self.assertFalse(is_white_color((255, 0, 255)))
+        self.assertFalse(is_white_color((0, 255, 255)))
+        self.assertFalse(is_white_color((0, 0, 255)))
+        self.assertFalse(is_white_color((255, 0, 0)))
+        self.assertFalse(is_white_color((0, 255, 0)))
+
+    def test_create_ellipse_mask_image(self):
+        x, y, w, h = get_default_position()
+        im = cut_region_in_image(self._test_im, x, y, w, h)
+        create_ellipse_mask_image(w, h, im)
 
     def test_createEllipseMaskImage_0_0(self):
         create_ellipse_mask_image(0, 0)
@@ -348,59 +484,59 @@ class ImageProcessTest(unittest.TestCase):
 
     def test_getEllipseAverageBright(self):
         im = cut_region_in_image(self._test_im, 160, 50, 640, 640)
-        self.assertEqual(getEllipseAverageBright(im), 127)
+        self.assertEqual(get_ellipse_average_bright(im), 127)
 
     def test_getEllipseAverageBright_White(self):
         im = Image.new("RGB", (640, 640), "rgb(255,255,255)")
-        self.assertEqual(getEllipseAverageBright(im), 255)
+        self.assertEqual(get_ellipse_average_bright(im), 255)
 
     def test_getEllipseAverageBright_Black(self):
         im = Image.new("RGB", (640, 640), "rgb(0,0,0)")
-        self.assertEqual(getEllipseAverageBright(im), 0)
+        self.assertEqual(get_ellipse_average_bright(im), 0)
 
     def test_drawEllipseHistogram(self):
         im = self._test_im.filter(ImageFilter.SMOOTH_MORE).filter(ImageFilter.SMOOTH_MORE)
-        im = drawEllipseHistogram(im)
+        im = draw_ellipse_histogram(im)
 
     def test_drawEllipseHistogram_Bright(self):
         im = self._test_im.filter(ImageFilter.SMOOTH_MORE).filter(ImageFilter.SMOOTH_MORE)
-        im = drawEllipseHistogram(im.convert("L"))
+        im = draw_ellipse_histogram(im.convert("L"))
 
     def test_getEllipseAverageRGB(self):
         im = cut_region_in_image(self._test_im, 160, 50, 640, 640)
-        self.assertEqual(getEllipseAverageRGB(im), (177, 119, 41))
+        self.assertEqual(get_ellipse_average_RGB(im), (177, 119, 41))
 
     def test_getEllipseAverageRGB_White(self):
         im = Image.new("RGB", (640, 640), "rgb(255,255,255)")
-        self.assertEqual(getEllipseAverageRGB(im), (255, 255, 255))
+        self.assertEqual(get_ellipse_average_RGB(im), (255, 255, 255))
 
     def test_getEllipseAverageRGB_Black(self):
         im = Image.new("RGB", (640, 640), "rgb(0,0,0)")
-        self.assertEqual(getEllipseAverageRGB(im), (0, 0, 0))
+        self.assertEqual(get_ellipse_average_RGB(im), (0, 0, 0))
 
     def test_getEllipseMaxCountBright(self):
         im = cut_region_in_image(self._test_im, 160, 50, 640, 640)
-        self.assertEqual(getEllipseMaxCountBright(im), 173)
+        self.assertEqual(get_ellipse_max_count_bright(im), 173)
 
     def test_getEllipseMaxCountBright_0(self):
         im = Image.new("RGB", (640, 640), "rgb(0,0,0)")
-        self.assertEqual(getEllipseMaxCountBright(im), 0)
+        self.assertEqual(get_ellipse_max_count_bright(im), 0)
 
     def test_getEllipseMaxCountBright_255(self):
         im = Image.new("RGB", (640, 640), "rgb(255,255,255)")
-        self.assertEqual(getEllipseMaxCountBright(im), 255)
+        self.assertEqual(get_ellipse_max_count_bright(im), 255)
 
     def test_getEllipseMaxCountRGB(self):
         im = cut_region_in_image(self._test_im, 160, 50, 640, 640)
-        self.assertEqual(getEllipseMaxCountRGB(im), (240, 156, 0))
+        self.assertEqual(get_ellipse_max_count_RGB(im), (240, 156, 0))
 
     def test_getEllipseMaxCountRGB_0(self):
         im = Image.new("RGB", (640, 640), "rgb(0,0,0)")
-        self.assertEqual(getEllipseMaxCountRGB(im), (0, 0, 0))
+        self.assertEqual(get_ellipse_max_count_RGB(im), (0, 0, 0))
 
     def test_getEllipseMaxCountRGB_255(self):
         im = Image.new("RGB", (640, 640), "rgb(255,255,255)")
-        self.assertEqual(getEllipseMaxCountRGB(im), (255, 255, 255))
+        self.assertEqual(get_ellipse_max_count_RGB(im), (255, 255, 255))
 
     def test_filterList(self):
         l = list(range(256))
