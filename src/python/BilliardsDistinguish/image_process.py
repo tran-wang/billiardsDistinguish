@@ -68,7 +68,7 @@ def create_ellipse_mask_image(width, height, im=None):
 def is_white_color(color):
     if isinstance(color, tuple):
         h, l, s = colorsys.rgb_to_hls(color[0], color[1], color[2])
-        return abs(s) < 0.60 and l > 75
+        return abs(s) < 0.60 and l > 128
     else:
         return color > 128
 
@@ -166,6 +166,17 @@ def smooth_histogram(histogram, filterLength=41):
     for i in range(bands_count):
         _filterList(histogram, filter, start=256 * i, end=256 * (i + 1))
     return histogram
+
+def draw_ellipse_histogram_hsl(im, masked=False):
+    assert str(im.mode) == "RGB"
+    width, height = im.size
+    for x in xrange(width):
+        for y in xrange(height):
+            r, g, b = im.getpixel((x, y))
+            h, l, s = colorsys.rgb_to_hls(r, g, b)
+            im.putpixel((x, y), (int(h * 255), int(l), int(abs(s))))
+    return draw_ellipse_histogram(im, masked)
+
 
 def draw_ellipse_histogram(im, masked=False):
     '''draw histogram to a new image, use get_ellipse_histogram_of_image(im,masked)
@@ -410,6 +421,28 @@ def _multiList(v1, v2):
     return result
 
 
+def get_ellipse_color_features(im):
+    '''get follow features of the ellipse:
+        total pixels count: all pixels inside the ellipse
+        white pixels count: all pixels inside the ellipse and is white color.
+        most represented color(R,G,B) expect white.
+    '''
+    totalPixelCount = 0
+    whitePixelCount = 0
+    width, height = im.size
+    imMask = create_ellipse_mask_image(width, height)
+    for x in xrange(width):
+        for y in xrange(height):
+            if imMask.getpixel((x, y)) != 0:  # inside ellipse
+                totalPixelCount = totalPixelCount + 1
+                if  is_white_color(im.getpixel((x, y))):
+                    whitePixelCount = whitePixelCount + 1
+    r, g, b = get_ellipse_max_count_RGB(im, masked=True)
+
+    return totalPixelCount, whitePixelCount, r, g, b
+
+
+
 ###############################################################################
 # for unit test
 ###############################################################################
@@ -419,7 +452,7 @@ class ImageProcessTest(unittest.TestCase):
         return f
 
     def setUp(self):
-        self._test_im = Image.open("../../../pictures/640.480/0_a.jpg")
+        self._test_im = Image.open("../../../pictures/VGA/0_a.jpg")
 
     def tearDown(self):
         self._test_im = None
